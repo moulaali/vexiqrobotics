@@ -1,3 +1,4 @@
+#endregion VEXcode Generated Robot Configuration
 #region VEXcode Generated Robot Configuration
 from vex import *
 import gc
@@ -14,7 +15,7 @@ PORT_MAP = {
 def print_leopard():
     art = r"""
             ("`-''-/").___..--''"`-._ 
-            `6_ 6  )   `-.  (     ).`-.__.`) 
+            `6_ 7  )   `-.  (     ).`-.__.`) 
             (_Y_.)'  ._   )  `._ `. ``-..-' 
             _..`--'_..-_/  /--'_.'
             ((((.-''  ((((.'  (((.-'  
@@ -281,22 +282,26 @@ def main():
     print("Leopards ready?")
     print("Brain connected. Battery: %d %%" % brain.battery.capacity())
 
-    claw = ClawMotor(port_number=9, name="Claw", speed_pct=60, reversed=False)
-    drive = DriveMotor(left_port=12, right_port=11, default_speed_pct=50)
+    claw = ClawMotor(port_number=4, name="Claw", speed_pct=60, reversed=False)
+    drive = DriveMotor(left_port=7, right_port=12, default_speed_pct=50)
     lift = LiftMotor(port_num=10, default_speed_pct=80, reversed=False)
-    test_lift(lift)
+    #test_lift(lift)
 
-    # # example demo
-    # claw.open(); 
-    # claw.close()
-    # #lift.up_by(0.9)
+    # example demo
+    claw.open() 
+    claw.close()
+    drive.forward(2.5)
+    claw.open()
+    drive.backward(1)
+
     
-    # drive.turn_left(degrees=45)
-    # drive.forward(rotations=3)
+    # drive.turn_right(degrees=45)
+    # drive.forward(rotations=2.5)
+    # drive.turn_right(degrees=45)
     
     # #lift.down_by(.9)
-    # claw.open()
+    #claw.open()
     
-    # drive.backward(rotations=1)
+    #drive.backward(rotations=1)
 
 main()
