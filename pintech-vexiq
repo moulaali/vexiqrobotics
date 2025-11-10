@@ -1,0 +1,315 @@
+#endregion VEXcode Generated Robot Configuration
+from vex import *
+import gc
+
+brain = Brain()
+print("Brain connected. Battery: %d %%" % brain.battery.capacity())
+
+PORT_MAP = {
+    1: Ports.PORT1,  2: Ports.PORT2,  3: Ports.PORT3,  4: Ports.PORT4,
+    5: Ports.PORT5,  6: Ports.PORT6,  7: Ports.PORT7,  8: Ports.PORT8,
+    9: Ports.PORT9, 10: Ports.PORT10, 11: Ports.PORT11, 12: Ports.PORT12
+}
+
+# ✅ AI Vision sensor
+vs = AiVision(Ports.PORT2, AiVision.ALL_AIOBJS)
+print("[INIT] AI Vision sensor created successfully.")
+
+
+# ------------------------------------------------------------
+# ASCII Fun
+# ------------------------------------------------------------
+def print_leopard():
+    art = r"""
+            ("`-''-/").___..--''"`-._ 
+            `6_ 7  )   `-.  (     ).`-.__.`) 
+            (_Y_.)'  ._   )  `._ `. ``-..-' 
+            _..`--'_..-_/  /--'_.'
+            ((((.-''  ((((.'  (((.-'  
+    """
+    print(art)
+
+
+# ------------------------------------------------------------
+# DriveMotor CLASS
+# ------------------------------------------------------------
+class DriveMotor:
+    def __init__(self, left_port, right_port,
+                 name="Drive", default_speed_pct=50, reversed_right=True):
+
+        self.name = name
+        self.speed_pct = int(default_speed_pct)
+
+        self.left = Motor(PORT_MAP[left_port])
+        self.right = Motor(PORT_MAP[right_port])
+
+        for m in (self.left, self.right):
+            try: m.set_stopping(BRAKE)
+            except: pass
+            try: m.set_velocity(self.speed_pct, PERCENT)
+            except: pass
+            try: m.set_position(0, DEGREES)
+            except: pass
+
+        try: self.right.set_reversed(bool(reversed_right))
+        except: pass
+
+        print("%s ready: left=%d right=%d" % (self.name, left_port, right_port))
+
+    def _stop(self):
+        try: self.left.stop()
+        except: pass
+        try: self.right.stop()
+        except: pass
+
+    def forward(self, rotations=1.0, speed_pct=None):
+        if speed_pct is not None:
+            try:
+                self.left.set_velocity(int(speed_pct), PERCENT)
+                self.right.set_velocity(int(speed_pct), PERCENT)
+            except: pass
+        print("Driving forward %.2f rotations..." % rotations)
+        try:
+            self.left.spin_for(FORWARD, rotations, TURNS, False)
+            self.right.spin_for(FORWARD, rotations, TURNS, True)
+        except:
+            self.left.spin(FORWARD)
+            self.right.spin(FORWARD)
+            wait(1000, MSEC)
+        self._stop()
+
+    def backward(self, rotations=1.0, speed_pct=None):
+        if speed_pct is not None:
+            try:
+                self.left.set_velocity(int(speed_pct), PERCENT)
+                self.right.set_velocity(int(speed_pct), PERCENT)
+            except: pass
+        print("Driving backward %.2f rotations..." % rotations)
+        try:
+            self.left.spin_for(REVERSE, rotations, TURNS, False)
+            self.right.spin_for(REVERSE, rotations, TURNS, True)
+        except:
+            self.left.spin(REVERSE)
+            self.right.spin(REVERSE)
+            wait(1000, MSEC)
+        self._stop()
+
+    def turn_left(self, degrees=90, speed_pct=None):
+        if speed_pct is not None:
+            try:
+                self.left.set_velocity(int(speed_pct), PERCENT)
+                self.right.set_velocity(int(speed_pct), PERCENT)
+            except: pass
+        print("Turning left %d deg..." % degrees)
+        turn_rot = degrees / 90.0 * 0.5
+        try:
+            self.left.spin_for(REVERSE, turn_rot, TURNS, False)
+            self.right.spin_for(FORWARD, turn_rot, TURNS, True)
+        except:
+            self.left.spin(REVERSE)
+            self.right.spin(FORWARD)
+            wait(800, MSEC)
+        self._stop()
+
+    def turn_right(self, degrees=90, speed_pct=None):
+        if speed_pct is not None:
+            try:
+                self.left.set_velocity(int(speed_pct), PERCENT)
+                self.right.set_velocity(int(speed_pct), PERCENT)
+            except: pass
+        print("Turning right %d deg..." % degrees)
+        turn_rot = degrees / 90.0 * 0.5
+        try:
+            self.left.spin_for(FORWARD, turn_rot, TURNS, False)
+            self.right.spin_for(REVERSE, turn_rot, TURNS, True)
+        except:
+            self.left.spin(FORWARD)
+            self.right.spin(REVERSE)
+            wait(800, MSEC)
+        self._stop()
+
+
+# ------------------------------------------------------------
+# PintechRobot CLASS (NO f-strings)
+
+
+class PintechRobot:
+    def __init__(self,
+                 drive,
+                 vision,
+                 color_map=None,
+                 cx_mid=160,          # 320px wide => center ~160
+                 min_area=500,        # ignore tiny blobs
+                 turn_step_deg=10,
+                 scan_speed_pct=18):
+
+        self.drive = drive
+        self.vs = vision
+        self.cx_mid = int(cx_mid)
+        self.min_area = int(min_area)
+        self.turn_step = max(1, int(turn_step_deg))
+        self.scan_speed = int(scan_speed_pct)
+
+        # Default map for VIQRC Mix & Match (from your doc)
+        # Beam=0, Blue Pin=1, Red Pin=2, Orange Pin=3
+        if color_map is None:
+            self.color_map = {0:"BEAM", 1:"BLUE", 2:"RED", 3:"ORANGE"}
+        else:
+            self.color_map = color_map
+
+        # try to slow scan turns (best effort)
+        try:
+            self.drive.left.set_velocity(self.scan_speed, PERCENT)
+            self.drive.right.set_velocity(self.scan_speed, PERCENT)
+        except Exception:
+            pass
+
+    def _label_of(self, obj_id):
+        # map id -> upper label; fall back to empty
+        return (self.color_map.get(obj_id, "") or "").upper()
+
+    def _snapshot_all(self, max_count=8):
+        """Return tuple of objects from the current model (Mix&Match if configured)."""
+        try:
+            return self.vs.take_snapshot(AiVision.ALL_AIOBJS, count=max_count) or ()
+        except Exception:
+            return ()
+
+    def _best_obj_for_color(self, color_upper):
+        """
+        Take a snapshot and return (best_obj, area).
+        Objects are largest→smallest by width per API; we still compute area.
+        """
+        objs = self._snapshot_all(8)
+        best_obj, best_area = None, 0
+
+        # Sprint log: list what we saw
+        if objs:
+            for o in objs:
+                oid = getattr(o, "id", None)
+                lbl = self._label_of(oid)
+                w = int(getattr(o, "width", 0))
+                h = int(getattr(o, "height", 0))
+                area = w * h
+                print("[VISION] id=%s label=%s w=%d h=%d area=%d cx=%s cy=%s score=%s" %
+                      (str(oid), lbl, w, h, area,
+                       str(getattr(o, "centerX", "?")),
+                       str(getattr(o, "centerY", "?")),
+                       str(getattr(o, "score", "?"))))
+
+                if lbl == color_upper and area >= self.min_area:
+                    if area > best_area:
+                        best_obj, best_area = o, area
+        else:
+            print("[VISION] No objects in snapshot")
+
+        return best_obj, best_area
+
+    def _step_turn(self, right=True):
+        if right:
+            print("[SCAN] Turning RIGHT %d deg" % self.turn_step)
+            self.drive.turn_right(self.turn_step, speed_pct=self.scan_speed)
+        else:
+            print("[SCAN] Turning LEFT %d deg" % self.turn_step)
+            self.drive.turn_left(self.turn_step, speed_pct=self.scan_speed)
+
+    def scanPin(self, color,
+                max_sweep_deg=360,
+                prefer_right=True,
+                recentre_on_detect=True,
+                centre_tolerance_px=8):
+        """
+        Slowly rotate until a Mix&Match pin of the given color is visible.
+        color: 'RED' | 'BLUE' | 'ORANGE' (case-insensitive). 'BEAM' also allowed.
+        """
+        target = (color or "").upper().strip()
+        step = self.turn_step
+        total_budget = int(max_sweep_deg)
+
+        steps = 0
+        turned = 0
+        right = bool(prefer_right)
+
+        print("\n===================================================")
+        print("[SCAN] Searching for %s (Mix&Match model via ALL_AIOBJS)" % target)
+        print("[SCAN] Sweep %d deg, step %d deg" % (total_budget, step))
+        print("===================================================")
+
+        while turned < total_budget:
+            obj, area = self._best_obj_for_color(target)
+
+            if obj:
+                cx = int(getattr(obj, "centerX", self.cx_mid))
+                cy = int(getattr(obj, "centerY", 0))
+                oid = getattr(obj, "id", None)
+                print("[FOUND] %s id=%s at X=%d area=%d" % (target, str(oid), cx, area))
+
+                err = cx - self.cx_mid
+                centered = abs(err) <= centre_tolerance_px
+
+                if centered:
+                    print("[CENTER] Already centered (err=%d)" % err)
+                elif recentre_on_detect:
+                    print("[CENTER] Need centering err=%d" % err)
+                    nudge_steps = max(1, min(3, abs(err)//8))
+                    for i in range(nudge_steps):
+                        if err > 0:
+                            print("[CENTER] Nudge %d RIGHT" % (i+1))
+                            self._step_turn(True)
+                        else:
+                            print("[CENTER] Nudge %d LEFT" % (i+1))
+                            self._step_turn(False)
+                        turned += step
+                        steps += 1
+                        wait(30, MSEC)
+
+                        obj2, _ = self._best_obj_for_color(target)
+                        if obj2:
+                            new_cx = int(getattr(obj2, "centerX", self.cx_mid))
+                            err = new_cx - self.cx_mid
+                            print("[CENTER] New err=%d" % err)
+                            if abs(err) <= centre_tolerance_px:
+                                centered = True
+                                print("[CENTER] SUCCESS — centered!")
+                                break
+                        else:
+                            print("[CENTER] Lost sight; will resume scanning.")
+                            break
+
+                return {
+                    "found": True,
+                    "color": target,
+                    "centerX": cx,
+                    "centerY": cy,
+                    "area": area,
+                    "centered": centered,
+                    "steps": steps,
+                    "turned_deg": turned
+                }
+
+            print("[SCAN] %s not found — rotating..." % target)
+            self._step_turn(right)
+            turned += step
+            steps += 1
+
+
+            wait(25, MSEC)
+
+        print("[FAIL] %s NOT FOUND after %d deg sweep" % (target, turned))
+        return {"found": False, "color": target, "steps": steps, "turned_deg": turned}
+
+
+
+# MAIN
+# ------------------------------------------------------------
+def main():
+    print_leopard()
+    print("Leopards ready!")
+
+    drive = DriveMotor(1, 2, default_speed_pct=40)
+    robot = PintechRobot(drive, vs)
+
+    result = robot.scanPin("RED")
+    print("RESULT:", result)
+
+main()
