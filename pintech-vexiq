@@ -1,4 +1,4 @@
-#endregion VEXcode Generated Robot Configuration
+
 from vex import *
 import gc
 
@@ -10,10 +10,6 @@ PORT_MAP = {
     5: Ports.PORT5,  6: Ports.PORT6,  7: Ports.PORT7,  8: Ports.PORT8,
     9: Ports.PORT9, 10: Ports.PORT10, 11: Ports.PORT11, 12: Ports.PORT12
 }
-
-# ✅ AI Vision sensor
-vs = AiVision(Ports.PORT2, AiVision.ALL_AIOBJS)
-print("[INIT] AI Vision sensor created successfully.")
 
 
 # ------------------------------------------------------------
@@ -28,6 +24,128 @@ def print_leopard():
             ((((.-''  ((((.'  (((.-'  
     """
     print(art)
+
+
+# ------------------------------------------------------------
+# VisionSensor CLASS - Simple wrapper for AI Vision
+# ------------------------------------------------------------
+class VisionSensor:
+    def __init__(self, port, color_map=None):
+        """
+        Initialize AI Vision sensor for VEX IQ Mix & Match.
+        port: Port number (1-12) where the vision sensor is connected
+        color_map: Optional dict mapping object IDs to color names
+        """
+        self.vision = AiVision(PORT_MAP[port])
+
+        # Default Mix & Match color mapping
+        # Beam=0, Blue Pin=1, Red Pin=2, Orange Pin=3
+        if color_map is None:
+            self.color_map = {0: "BEAM", 1: "BLUE", 2: "RED", 3: "ORANGE"}
+        else:
+            self.color_map = color_map
+
+        print("Vision sensor ready on port %d" % port)
+
+    def get_color_name(self, obj_id):
+        """Get the color name for an object ID."""
+        return self.color_map.get(obj_id, "UNKNOWN")
+
+    def scan(self, print_results=True):
+        """
+        Scan for Mix & Match objects and return list of detected objects.
+        Returns list of dicts with object info: id, color, position, size, score
+        """
+        detected = []
+
+        if print_results:
+            print("\n========== VISION SCAN ==========")
+
+        try:
+            # Take a single snapshot (no parameters for AI Classification)
+            result = self.vision.take_snapshot()
+            
+            if print_results:
+                print("[DEBUG] take_snapshot() returned: %s (type: %s)" % (str(result), type(result).__name__))
+            
+            # Check if we got any objects
+            if result:
+                # Try to get object count
+                try:
+                    obj_count = self.vision.object_count
+                    if print_results:
+                        print("[DEBUG] object_count: %d" % obj_count)
+                    
+                    # Iterate through detected objects
+                    for i in range(obj_count):
+                        try:
+                            obj = self.vision.objects[i]
+                            obj_id = obj.id
+                            color = self.get_color_name(obj_id)
+                            cx = obj.centerX
+                            cy = obj.centerY
+                            width = obj.width
+                            height = obj.height
+
+                            obj_info = {
+                                "id": obj_id,
+                                "color": color,
+                                "centerX": cx,
+                                "centerY": cy,
+                                "width": width,
+                                "height": height,
+                                "area": width * height
+                            }
+                            detected.append(obj_info)
+
+                            if print_results:
+                                print("  %s (id=%d) | pos=(%d,%d) | size=%dx%d | area=%d" %
+                                      (color, obj_id, cx, cy, width, height, width * height))
+                        except Exception as e:
+                            if print_results:
+                                print("[DEBUG] Error accessing object %d: %s" % (i, str(e)))
+                            
+                except AttributeError:
+                    # Try alternative: just get largest_object
+                    try:
+                        obj = self.vision.largest_object()
+                        obj_id = obj.id
+                        color = self.get_color_name(obj_id)
+                        cx = obj.centerX
+                        cy = obj.centerY
+                        width = obj.width
+                        height = obj.height
+
+                        obj_info = {
+                            "id": obj_id,
+                            "color": color,
+                            "centerX": cx,
+                            "centerY": cy,
+                            "width": width,
+                            "height": height,
+                            "area": width * height
+                        }
+                        detected.append(obj_info)
+
+                        if print_results:
+                            print("  %s (id=%d) | pos=(%d,%d) | size=%dx%d | area=%d" %
+                                  (color, obj_id, cx, cy, width, height, width * height))
+                    except Exception as e:
+                        if print_results:
+                            print("[DEBUG] Error with largest_object: %s" % str(e))
+                            
+        except Exception as e:
+            if print_results:
+                print("[DEBUG] take_snapshot error: %s" % str(e))
+
+        if print_results:
+            if detected:
+                print("Found %d object(s) total" % len(detected))
+            else:
+                print("No objects detected")
+            print("=================================\n")
+
+        return detected
 
 
 # ------------------------------------------------------------
@@ -306,10 +424,25 @@ def main():
     print_leopard()
     print("Leopards ready!")
 
-    drive = DriveMotor(1, 2, default_speed_pct=40)
-    robot = PintechRobot(drive, vs)
+    # Initialize vision sensor on port 1
+    vision = VisionSensor(1)
 
-    result = robot.scanPin("RED")
-    print("RESULT:", result)
+    print("\nStarting continuous scan... (Press Ctrl+C to stop)")
+    print("Move the sensor around to detect objects!\n")
+
+    # Continuous scanning loop
+    try:
+        while True:
+            vision.scan()
+            wait(500, MSEC)  # Wait 500ms between scans
+    except KeyboardInterrupt:
+        print("\nScan stopped by user")
+
+    # Uncomment to test with robot:
+    # drive = DriveMotor(1, 2, default_speed_pct=40)
+    # robot = PintechRobot(drive, vs)
+    # result = robot.scanPin("RED")
+    # print("RESULT:", result)
 
 main()
+
